@@ -1,0 +1,133 @@
+## hyper-parameters
+seed: 42 # 随机种子
+train_setting: 
+    model_dir: models/  # 输出的路径
+    batch_size: &train_setting.batch_size 32 # batch size
+    eval_size:  32 # 评估的batch size
+    epochs: 2 # 训练的epoch
+    lr: 2e-5  # 学习率
+    weight_decay: 1e-2 # 权重衰减
+    adam_epsilon: 1e-8 # adam的epsilon
+    warmup_ratio: 0.1 # warmup的比例
+    bias_correction: true # 是否进行bias correction
+    do_train: true # 是否训练
+    do_test: false # 是否测试
+    do_eval: true # 是否评估
+        
+    not_force_overwrite: true
+    cal_time: true # 是否计算时间
+    ## new finetune
+    beta: 0.5
+    soft_label: 1
+    b: 0.2
+    # force_overwrite: true # 是否强制覆盖
+
+## dataset meta
+dataset_meta:
+    imdb: &dataset_meta.imdb
+        name: imdb
+        num_labels: 2
+        output_mode: classification
+
+    ag_news: &dataset_meta.ag_news
+        name: ag_news
+        num_labels: 4
+        output_mode: classification
+    glue: &dataset_meta.glue
+        name: glue
+        num_labels: 2
+        output_mode: classification
+
+dataset_setting: &dataset_setting
+    <<: *dataset_meta.glue
+    task_name: sst2 # task_name
+    batch_size: *train_setting.batch_size
+    shuffle: true
+    #ckpt_dir: /root/Robust_Data/baselines/fine_tune/saved_models # 保存模型的路径
+    #num_labels: 2 # 2分类
+    #valid: validation # 验证集的名称
+    do_lower_case: true # 是否小写
+    max_seq_length: 128 # 最大序列长度
+
+## model
+model_setting:
+    model_name: bert-base-uncased
+    dataset_name: glue
+    task_name: sst2
+    #ckpt_dir: /root/Robust_Data/baselines/fine_tune/saved_models # 保存模型的路径
+    #valid: validation # 验证集的名称
+    reinit_classifier: false  # 是否重新初始化分类器
+    freeze_bert: false # 是否冻结bert
+    do_train: true # 是否训练
+    do_test: false # 是否测试
+    do_eval: true # 是否评估
+    do_lower_case: true # 是否小写
+    max_seq_length: 128 # 最大序列长度
+
+statistics_setting:
+    with_untrained_model: 1 # 是否使用未训练的模型
+    interval: 1.0 # 间隔多少个epoch进行一次统计
+    use_fgsm: false
+    use_cur_preds: 0 # 是否使用当前的预测结果来计算loss
+
+## others
+
+select_data:
+    ## few-shot setting
+    random_select: 0 # 是否随机选择
+    # num_train_examples_per_class: -1
+    num_train_examples_ratio: 1.0 # 训练集的比例
+    data_indices_file: null   # 数据的索引文件
+    statistics_source: /root/Robust_Data/robust_statistics_datasetglue_tasksst2_lenNone_adv_steps10_adv_lr0.08_epoch5_lr2e-05_interval400.npy 
+    select_metric: loss_diff_mean # 选择的metric
+    select_metric2: loss_diff_mean_r # 选择的metric
+    select_ratio: 0.3 # 选择的比例
+    select_ratio2: 0.3
+    select_from_two_end: 0 # 从两端选择
+    ratio_proportion: 0.5 # 选择的比例
+    do_balance_labels: 1 # 是否平衡标签
+    only_original_pred: 1 # 是否只有预测正确了才会被纳入统计
+    cycle_train: 0 # 交替训练，如果大于0，则代表一次连续对某个subset训练多少epoch
+    save_steps: -1 # 保存模型的step
+    show_data: -1 # 展示选择的data
+
+text_attack:
+    ## attack
+    do_attack: false
+    attack_all: false
+    neighbour_vocab_size: 10 # 邻居词的大小
+    modify_ratio: 0.15 # 修改的比例
+    sentence_similarity: 0.85 # 句子相似度
+    results_file: attack_log.csv # 攻击的结果文件
+    num_examples: 1000  # 攻击的样本数
+    attack_method: textfooler # 攻击的方法  
+
+adverisal_setting:
+    ## pgd attack
+    attack_every_epoch: 0 # 每个epoch进行多少次attack
+    attack_every_step: 0 # 每个step进行多少次attack
+    do_pgd_attack: 1
+    pgd_step: 5
+    pgd_lr: 0.05
+    ## freelb
+    pgd_adv_steps: 5
+    pgd_adv_steps2: 10
+    pgd_adv_lr: 0.03
+    pgd_adv_lr2: 0.03
+    do_pgd_training: 0  
+    adv_steps: 5
+    adv_lr: 0.03
+    adv_init_mag: 0.05 # delta的上下界
+    adv_max_norm: 0
+    adv_norm_type: l2
+    adv_change_rate: 0.2
+    max_grad_norm: 1
+
+
+
+
+
+
+
+
+

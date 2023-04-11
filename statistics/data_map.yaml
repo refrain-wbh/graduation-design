@@ -1,0 +1,29 @@
+# 实验1
+remind: 第一个实验，观察interval为1的情况
+train_setting:
+    epoch: 10
+    lr: 2e-05
+
+adverisal_setting:
+    adv_steps: 8
+    adv_lr: 0.08
+
+statistics_setting:
+    with_untrained_model: 1
+    interval: 1.0
+    use_cur_preds: 1
+
+---
+remind: 第二个实验，观察interval为0.5的情况
+train_setting:
+    epoch: 10
+    lr: 2e-05
+
+adverisal_setting:
+    adv_steps: 8
+    adv_lr: 0.08
+
+statistics_setting:
+    with_untrained_model: 1
+    interval: 0.5
+    use_cur_preds: 1
