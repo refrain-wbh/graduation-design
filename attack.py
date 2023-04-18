@@ -1,160 +1,129 @@
+import os
+import csv
 
-def do_textattack_attack(args,model, tokenizer,
-                         do_attack=False,attack_seed=42,attack_all=False,
-                         attack_method="textfooler",attack_every_epoch=False,attack_every_step=False,log_format=None):
-    # attack_seed = 42
-    model.eval()
-    from attack.attack_all import do_attack_with_model
+import sys
+import argparse
+from transformers import AutoConfig, AutoTokenizer, BertForSequenceClassification
 
-    if attack_all:
-        attack_methods = ["textfooler", "textbugger",
-                          "bertattack"]  # todo done bertattack放最后一个，因为要改变攻击的参数！！！
+# from models.modeliing_bert import BertForSequenceClassification
+
+# from modeling_roberta_ER import RobertaForSequenceClassification
+
+from textattack import Attacker
+from textattack import AttackArgs
+
+from textattack.models.wrappers import HuggingFaceModelWrapper
+
+# from utils import HuggingfaceDataset
+from textattack.datasets import HuggingFaceDataset
+from textattack.attack_results import (
+    SuccessfulAttackResult,
+    MaximizedAttackResult,
+    FailedAttackResult,
+)
+from pathlib import Path
+import time
+from loguru import logger
+
+cur_time = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime(time.time() + 8 * 60 * 60))
+file_name = Path(__file__).name.split(".")[0]
+log_file = f"log/{file_name}/{cur_time}.log"
+logger.add(
+    log_file,
+    rotation="100 MB",
+    diagnose=True,
+    backtrace=True,
+    enqueue=True,
+    retention="10 days",
+    compression="zip",
+)
+
+
+from build_attacker_utils import build_weak_attacker, build_english_attacker
+
+
+def do_attack_with_model(
+    model, tokenizer, dataset_setting, attack_setting, attack_method
+):
+    model_wrapper = HuggingFaceModelWrapper(model, tokenizer)
+    if attack_method == "bertattack":
+        neighbour_vocab_size = 50
+        modeify_ratio = 0.9
+        sentence_similarity = 0.2
+        attack = build_weak_attacker(
+            neighbour_vocab_size, sentence_similarity, model_wrapper, attack_method
+        )
+    elif (
+        attack_method == "textfooler" and dataset_setting.name == "SetFit/20_newsgroups"
+    ):
+        neighbour_vocab_size = 10
+        modeify_ratio = 0.9
+        sentence_similarity = 0.85
+        attack = build_weak_attacker(
+            neighbour_vocab_size, sentence_similarity, model_wrapper, attack_method
+        )
     else:
-        attack_methods = [attack_method]
-    # print(str(attack_all))
-    # print(str(attack_methods))
-    if log_format==None:
-        log_format = ["statistics_source",
-                       "select_metric",
-                       "select_ratio", "ratio_proportion",
-                       "selected_label_nums",
-                       "lr",
-                       "seed", "epochs",
-                       "pgd_step", "pgd_lr",
-                       "clean", "pgd_aua", "attack_method"
-                     ]
+        attack = build_english_attacker(model_wrapper, attack_method)
+    # attack = build_english_attacker(args, model_wrapper)
+    # dataset = utils.Huggingface_dataset(args,tokenizer,dataset_name,
+    #                              subset="sst2" if task_name=="sst-2" else task_name
+    #                              , split=valid)
+    # 注意这里的DataSet是textattack的dataset
+    dataset = HuggingFaceDataset(
+        name_or_dataset=dataset_setting.name,
+        subset=dataset_setting.task_name,
+        split="test"
+        if dataset_setting.name == "SetFit/20_newsgroups"
+        else "validation",
+    )
+    dataset.shuffle()
+    logger.info("shuffled attack set!")
+    if dataset_setting.name == "glue" and dataset_setting.task_name == "sst2":
+        attack_args = AttackArgs(
+            num_examples=attack_setting.num_examples,
+            disable_stdout=True,
+            random_seed=attack_setting.attack_seed,
+            shuffle=False,
+        )
+    else:
+        attack_args = AttackArgs(
+            num_examples=attack_setting.num_examples,
+            disable_stdout=True,
+            random_seed=attack_setting.attack_seed,
+            shuffle=True,
+        )
+    attacker = Attacker(attack, dataset, attack_args)
 
-    if attack_every_epoch:
-        log_format.append("cur_epoch")
-        log_format.append("cur_select_metric")
-        log_format.append("cycle_train")
-        log_format.append("clean_loss")
-        log_format.append("pgd_loss")
-        log_format.append("attack_every_epoch")
-        log_format.append("attack_dataset_metric")
-    elif attack_every_step:
-        log_format.append("cur_epoch")
-        log_format.append("save_steps")
-        log_format.append("cur_step")
-        log_format.append("cur_select_metric")
-        log_format.append("cycle_train")
-        log_format.append("clean_loss")
-        log_format.append("pgd_loss")
-        log_format.append("attack_every_step")
-        log_format.append("attack_dataset_metric")
+    num_results = 0
+    num_successes = 0
+    num_failures = 0
 
-    for attack_method in attack_methods:
-        args.attack_method = attack_method
+    printed = 0
+    for result in attacker.attack_dataset():
+        if printed == 0:
+            logger.info(result)
+            printed += 1
+        num_results += 1
+        if (
+            type(result) == SuccessfulAttackResult
+            or type(result) == MaximizedAttackResult
+        ):
+            num_successes += 1
+        if type(result) == FailedAttackResult:
+            num_failures += 1
 
-        args_dict = args.__dict__
-        data_row = [args_dict[i] for i in log_format]
-        do_attack_with_model(model,tokenizer,
-                             dataset_name=args.dataset_name,
-                             task_name=args.task_name,valid=args.valid,
-                             attack_method=args.attack_method,
-                             num_examples=args.num_examples,attack_seed=42,
-                             results_file=args.results_file,
-                             seed=args.seed,
-                             model_name=args.model_name,
-                             log_format=log_format,
-                             data_row=data_row
-                             )
-        # do_attack_with_model(args, model, tokenizer
-        #                      , log_format=log_format)
+    # compute metric
+    original_accuracy = (num_successes + num_failures) * 100.0 / num_results
+    accuracy_under_attack = num_failures * 100.0 / num_results
+    attack_succ = (
+        (original_accuracy - accuracy_under_attack) * 100.0 / original_accuracy
+    )
 
-    model.train()
-    model.zero_grad()
-
-def do_pgd_attack( dev_loader,
-                  device, model,
-                  adv_steps,adv_lr,adv_init_mag,
-                  adv_norm_type,
-                  adv_max_norm
-                  ):
-    model.eval()
-    pbar = tqdm(dev_loader)
-    correct = 0
-    total = 0
-    avg_loss = utils.ExponentialMovingAverage()
-    for model_inputs, labels in pbar:
-        model_inputs = {k: v.to(device) for k, v in model_inputs.items()}
-        labels = labels.to(device)
-        model.zero_grad()
-        word_embedding_layer = model.get_input_embeddings()
-        input_ids = model_inputs['input_ids']
-        attention_mask = model_inputs['attention_mask']
-        embedding_init = word_embedding_layer(input_ids)
-        # initialize delta
-        # if adv_init_mag > 0:
-        #     input_mask = attention_mask.to(embedding_init)
-        #     input_lengths = torch.sum(input_mask, 1)
-        #     if adv_norm_type == 'l2':
-        #         delta = torch.zeros_like(embedding_init).uniform_(-1, 1) * input_mask.unsqueeze(2)
-        #         dims = input_lengths * embedding_init.size(-1)
-        #         magnitude = adv_init_mag / torch.sqrt(dims)
-        #         delta = (delta * magnitude.view(-1, 1, 1))
-        #     elif adv_norm_type == 'linf':
-        #         delta = torch.zeros_like(embedding_init).uniform_(-adv_init_mag,
-        #                                                           adv_init_mag) * input_mask.unsqueeze(2)
-        # else:
-        delta = torch.zeros_like(embedding_init)
-        total_loss = 0.0
-        for astep in range(adv_steps):
-            # (0) forward
-            delta.requires_grad_()
-            batch = {'inputs_embeds': delta + embedding_init, 'attention_mask': attention_mask}
-            # logits = model(**batch).logits # todo ?不确定
-            logits = model(**batch, return_dict=False)[0]  # todo ?不确定
-            # _, preds = logits.max(dim=-1)
-            # (1) backward
-            losses = F.cross_entropy(logits, labels)
-            loss = torch.mean(losses)
-            # loss = loss / adv_steps
-            total_loss += loss.item()
-            loss.backward()
-            # loss.backward(retain_graph=True)
-
-            # (2) get gradient on delta
-            delta_grad = delta.grad.clone().detach()
-
-            # (3) update and clip
-            if adv_norm_type == "l2":
-                denorm = torch.norm(delta_grad.view(delta_grad.size(0), -1), dim=1).view(-1, 1, 1)
-                denorm = torch.clamp(denorm, min=1e-8)
-                delta = (delta + adv_lr * delta_grad / denorm).detach()
-                if adv_max_norm > 0:
-                    delta_norm = torch.norm(delta.view(delta.size(0), -1).float(), p=2, dim=1).detach()
-                    exceed_mask = (delta_norm > adv_max_norm).to(embedding_init)
-                    reweights = (adv_max_norm / delta_norm * exceed_mask + (1 - exceed_mask)).view(-1, 1, 1)
-                    delta = (delta * reweights).detach()
-            elif adv_norm_type == "linf":
-                denorm = torch.norm(delta_grad.view(delta_grad.size(0), -1), dim=1, p=float("inf")).view(-1, 1,
-                                                                                                         1)
-                denorm = torch.clamp(denorm, min=1e-8)
-                delta = (delta + adv_lr * delta_grad / denorm).detach()
-
-            model.zero_grad()
-            # optimizer.zero_grad()
-            embedding_init = word_embedding_layer(input_ids)
-        delta.requires_grad = False
-        batch = {'inputs_embeds': delta + embedding_init, 'attention_mask': attention_mask}
-        model.zero_grad()
-        # optimizer.zero_grad()
-        logits = model(**batch).logits
-
-        losses = F.cross_entropy(logits, labels)
-        loss = torch.mean(losses)
-        batch_loss = loss.item()
-        avg_loss.update(batch_loss)
-
-        _, preds = logits.max(dim=-1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-    pgd_accuracy = correct / (total + 1e-13)
-    pgd_aua = pgd_accuracy
-    logger.info(f'PGD Aua: {pgd_accuracy}')
-    logger.info(f'PGD Loss: {avg_loss.get_metric()}')
-
-    model.train()
-    model.zero_grad()
-    return pgd_accuracy,avg_loss
+    return {
+        "num_successes": num_successes,
+        "num_failures": num_failures,
+        "num_results": num_results,
+        "original_accuracy": original_accuracy,
+        "accuracy_under_attack": accuracy_under_attack,
+        "attack_succ": attack_succ,
+    }

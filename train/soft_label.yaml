@@ -1,0 +1,58 @@
+select_data:
+    ## few-shot setting
+    random_select: 0 # 是否随机选择
+    # num_train_examples_per_class: -1
+    num_train_examples_ratio: 1.0 # 训练集的比例
+    data_indices_file: null   # 数据的索引文件
+    statistics_source: statistics/npys/2023-04-12-13:23:52.npy
+    select_metric: "Flip Rate" # 选择的metric
+    select_metric2: loss_diff_mean_r # 选择的metric
+    select_ratio: 0.5 # 选择的比例
+    select_ratio2: 0.3
+    ratio_proportion: 0.5 # 选择的比例
+    do_balance_labels: 1 # 是否平衡标签
+    only_original_pred: 1 # 是否只有预测正确了才会被纳入统计
+    cycle_train: 0 # 交替训练，如果大于0，则代表一次连续对某个subset训练多少epoch
+    save_steps: -1 # 保存模型的step
+    show_data: -1 # 展示选择的data
+
+attack_setting:
+    ## attack
+    do_attack: false
+    attack_all: false
+    neighbour_vocab_size: 10 # 邻居词的大小
+    modify_ratio: 0.15 # 修改的比例
+    sentence_similarity: 0.85 # 句子相似度
+    results_file: attack_log.csv # 攻击的结果文件
+    num_examples: 1000  # 攻击的样本数
+    attack_method: textfooler # 攻击的方法  
+
+adverisal_setting:
+    ## pgd attack
+    attack_every_epoch: 0 # 每个epoch进行多少次attack
+    attack_every_step: 0 # 每个step进行多少次attack
+    do_pgd_attack: 1
+    pgd_step: 5 
+    pgd_lr: 0.05
+    ## freelb
+    pgd_adv_steps: 5
+    pgd_adv_steps2: 10
+    pgd_adv_lr: 0.03
+    pgd_adv_lr2: 0.03
+    do_pgd_training: 0  
+    adv_steps: 5
+    adv_lr: 0.03
+    adv_init_mag: 0.05 # delta的上下界,FGSM, PGD, FreeLB和Virtual Adversarial Training 0.01, 0.03, 0.05和0.1。
+    adv_max_norm: 0
+    adv_norm_type: l2
+    adv_change_rate: 0.2
+    max_grad_norm: 1
+
+
+
+
+
+
+
+
+

@@ -1,7 +1,7 @@
 # 实验1
 remind: 不用pred统计loss，interval应该要放大，因为我们要判断模型在训练过程中的改变
 train_setting:
-    epochs: 2
+    epochs: 10
     lr: 2e-05
     do_eval: false # 是否评估
 
@@ -12,3 +12,4 @@ adverisal_setting:
 statistics_setting:
     with_untrained_model: 1
     interval: 0.1
+    use_fgsm: true

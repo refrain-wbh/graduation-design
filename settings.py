@@ -1,15 +1,22 @@
-
 import torch
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 import random
 import numpy as np
+from accelerate import Accelerator
+
+accelerator = Accelerator()
+
+def get_accelerator():
+    return accelerator
 def set_seed(seed: int):
     """Sets the relevant random seeds."""
     random.seed(seed)
     np.random.seed(seed)
     torch.random.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+
 
 from transformers import AdamW
 
@@ -20,63 +27,100 @@ def get_optimizer(model, config_train):
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if not any(nd in n for nd in no_decay)
+            ],
             "weight_decay": config_train.weight_decay,
         },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": 0.0,
+        },
     ]
-    optimizer = AdamW(optimizer_grouped_parameters,
-                      lr=config_train.lr,
-                      eps=config_train.adam_epsilon,
-                      correct_bias=config_train.bias_correction
+    optimizer = AdamW(
+        optimizer_grouped_parameters,
+        lr=config_train.lr,
+        eps=config_train.adam_epsilon,
+        correct_bias=config_train.bias_correction,
     )
+    optimizer = accelerator.prepare(optimizer)
     return optimizer
 
-from models.modeliing_bert import BertForSequenceClassification
-from models.modeling_roberta import RobertaForSequenceClassification
+
+# from models.modeliing_bert import BertForSequenceClassification
+# from models.modeling_roberta import RobertaForSequenceClassification
 from transformers import (
-    AdamW, AutoConfig, AutoTokenizer,get_linear_schedule_with_warmup 
+    AdamW,
+    AutoConfig,
+    AutoTokenizer,
+    get_linear_schedule_with_warmup,
+    BertForSequenceClassification,
+    RobertaForSequenceClassification,
 )
 import utils
 from torch.utils.data import DataLoader
 
+
 def get_model_base(model_name):
-    if model_name =="bert-base-uncased":
+    if model_name == "bert-base-uncased":
         return BertForSequenceClassification
     elif model_name == "roberta-base":
-        return  RobertaForSequenceClassification
+        return RobertaForSequenceClassification
     else:
         return BertForSequenceClassification
 
+
 def get_model_tokenizer(config_model, num_labels):
-    model_config = AutoConfig.from_pretrained(config_model.model_name, num_labels=num_labels,mirror='tuna')
+    model_config = AutoConfig.from_pretrained(
+        config_model.model_name, num_labels=num_labels, mirror="tuna"
+    )
     tokenizer = AutoTokenizer.from_pretrained(config_model.model_name)
     model = get_model_base(config_model.model_name).from_pretrained(
-                                config_model.model_name, config=model_config)
-    model.to(device)
+        config_model.model_name, config=model_config
+    )
+    # model.to(device)
+    model,tokenizer = accelerator.prepare(model,tokenizer)
     if config_model.reinit_classifier:
         model.reinit_classifier()
     if config_model.freeze_bert:
         model.freeze_Bert()
     return model, tokenizer
 
-def get_dataloader(tokenizer,config_dataset,split='train',with_idx=False):
-    collator = utils.Collator(pad_token_id=tokenizer.pad_token_id,with_idx=with_idx)
-    custom_dataset = utils.HuggingfaceDataset(config_dataset= config_dataset, 
-                                              tokenizer = tokenizer,
-                                              split = split,
-                                              with_idx=with_idx)
-    
-    custom_loader = DataLoader(custom_dataset, 
-                               batch_size=config_dataset.batch_size, 
-                               shuffle=config_dataset.shuffle, 
-                               collate_fn=collator)
+
+def get_dataloader(tokenizer, config_dataset, split="train", with_idx=False):
+    collator = utils.Collator(pad_token_id=tokenizer.pad_token_id, with_idx=with_idx)
+    custom_dataset = utils.HuggingfaceDataset(
+        config_dataset=config_dataset,
+        tokenizer=tokenizer,
+        split=split,
+        with_idx=with_idx,
+    )
+
+    custom_loader = DataLoader(
+        custom_dataset,
+        batch_size=config_dataset.batch_size,
+        shuffle=config_dataset.shuffle,
+        collate_fn=collator,
+    )
+    custom_loader = accelerator.prepare(custom_loader)
     return custom_loader
+
 
 def get_scheduler(optimizer, config_train, train_loader):
     train_dataset_size = len(train_loader.dataset)
-    num_training_steps = train_dataset_size * config_train.epochs // config_train.batch_size
+    num_training_steps = (
+        train_dataset_size * config_train.epochs // config_train.batch_size
+    )
     epoch_steps = train_dataset_size // config_train.batch_size
     warmup_steps = num_training_steps * config_train.warmup_ratio
-    scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, num_training_steps)
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer, warmup_steps, num_training_steps
+    )
+    scheduler = accelerator.prepare(scheduler)
     return scheduler
